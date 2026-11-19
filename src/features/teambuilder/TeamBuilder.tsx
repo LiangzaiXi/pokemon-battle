@@ -154,11 +154,21 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
     const speciesOptions = useMemo<SearchOption[]>(() => {
         return ALL_SPECIES.filter((s) => !otherUsedNums.has(s.num)).map((s) => {
             const entry = getSpeciesEntry(s.name, s.num, s.forme)
-            const typeNames = s.types.map((tp) => getTypeEntry(tp)[lang]).join('/')
             return {
                 value: s.name,
                 label: `#${s.num} ${entry[lang]}`,
-                subLabel: lang === 'en' ? typeNames : `${s.name} · ${typeNames}`,
+                subLabel: (
+                    <span className="flex items-center gap-1">
+                        {s.types.map((tp) => (
+                            <span
+                                key={tp}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold leading-none ${TYPE_BADGE_CLS[tp] || 'bg-slate-600 text-white'}`}
+                            >
+                                {getTypeEntry(tp)[lang]}
+                            </span>
+                        ))}
+                    </span>
+                ),
                 searchText: buildSearchText(entry, `#${s.num} ${s.num} ${s.types.join(' ')}`),
                 icon: <PokemonMiniIcon name={s.name} />,
             }
@@ -170,9 +180,9 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
             return {
                 value: item.name,
                 label: entry[lang],
-                subLabel: lang === 'en' ? undefined : item.name,
                 searchText: buildSearchText(entry),
                 icon: <ItemIcon name={item.name} />,
+                detailKind: 'item',
             }
         })
     }, [lang])
@@ -182,8 +192,8 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
             return {
                 value: ab,
                 label: entry[lang],
-                subLabel: lang === 'en' ? undefined : ab,
                 searchText: buildSearchText(entry),
+                detailKind: 'ability',
             }
         })
     }, [abilities, lang])
@@ -194,7 +204,6 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
             return {
                 value: n.name,
                 label: modText ? `${entry[lang]} (${modText})` : entry[lang],
-                subLabel: lang === 'en' ? undefined : n.name,
                 searchText: buildSearchText(entry, `${modText} ${n.plus || ''} ${n.minus || ''}`),
             }
         })
@@ -205,7 +214,6 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
             return {
                 value: tp,
                 label: entry[lang],
-                subLabel: lang === 'en' ? undefined : tp,
                 searchText: buildSearchText(entry),
                 icon: <span className={`w-3 h-3 rounded-full inline-block ${TYPE_BADGE_CLS[tp] || 'bg-slate-500'}`} />,
             }
@@ -217,20 +225,21 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
             const m = gen.moves.get(moveName)
             const typeEntry = m ? getTypeEntry(m.type) : { en: '', zh: '', ja: '' }
             const cat = m ? getCategoryLabel(m.category, lang) : ''
-            const bp = m && m.basePower > 0 ? ` ${t('power')}${m.basePower}` : ''
+            const bp = m && m.basePower > 0 ? ` ${m.basePower}` : ''
             return {
                 value: moveName,
                 label: entry[lang],
-                subLabel: m ? `${typeEntry[lang]} · ${cat}${bp}` : undefined,
+                subLabel: m ? `${cat}${bp}` : undefined,
                 searchText: buildSearchText(entry, `${typeEntry.zh} ${typeEntry.ja} ${typeEntry.en} ${cat}`),
                 icon: m ? (
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${TYPE_BADGE_CLS[m.type] || 'bg-slate-600 text-white'}`}>
                         {typeEntry[lang]}
                     </span>
                 ) : undefined,
+                detailKind: 'move',
             }
         })
-    }, [learnableMoveNames, lang, t])
+    }, [learnableMoveNames, lang])
     const updateMember = (patch: Partial<PokemonMember>) => {
         setEditingTeam((prev) => ({
             ...prev,

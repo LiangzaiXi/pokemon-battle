@@ -219,6 +219,8 @@ export default function BattleArena({
     const [activeRoomCode, setActiveRoomCode] = useState('')
     const [roomMode, setRoomMode] = useState<'create' | 'join'>('create')
     const [onlineError, setOnlineError] = useState('')
+    const [copiedCode, setCopiedCode] = useState(false)
+    const [p2pStage, setP2pStage] = useState<'connecting' | 'handshaking' | 'refreshing'>('connecting')
     const [myRole, setMyRole] = useState<'p1' | 'p2'>('p1')
     const [pickedLimit, setPickedLimit] = useState<number>(isDoubles ? 4 : 3)
     const [stagePlaying, setStagePlaying] = useState<boolean>(false)
@@ -625,6 +627,8 @@ export default function BattleArena({
         cleanupAll()
         setStarted(false)
         setOnlineError('')
+        setCopiedCode(false)
+        setP2pStage('connecting')
         setRoomMode(joinType)
         setActiveRoomCode(cleanCode)
         setOnlineStatus('waiting')
@@ -652,6 +656,9 @@ export default function BattleArena({
             },
             onProtocol(chunk) {
                 handleProtocolChunk(chunk)
+            },
+            onStatusChange(stage) {
+                setP2pStage(stage)
             },
             onFormatMismatch(peerFormat) {
                 cleanupAll()
@@ -995,18 +1002,30 @@ export default function BattleArena({
                         <span>
                             {roomMode === 'create'
                                 ? lang === 'zh'
-                                    ? `🏠 房间码：${activeRoomCode}，等待对手加入（当前赛制：${formatLabel(format)}）…`
-                                    : `🏠 Room Code: ${activeRoomCode} — Waiting for opponent (${formatLabel(format)})...`
+                                    ? `🏠 房间码：${activeRoomCode}（${formatLabel(format)}）· ${p2pStage === 'handshaking' ? '已发现对手，正在握手…' : p2pStage === 'refreshing' ? '正在刷新信令…' : '等待对手加入…'}`
+                                    : `🏠 Room: ${activeRoomCode} (${formatLabel(format)}) · ${p2pStage === 'handshaking' ? 'Handshaking...' : p2pStage === 'refreshing' ? 'Refreshing...' : 'Waiting...'}`
                                 : lang === 'zh'
-                                    ? `🔗 正在连接房间：${activeRoomCode}（当前赛制：${formatLabel(format)}）…`
-                                    : `🔗 Connecting to Room: ${activeRoomCode} (${formatLabel(format)})...`}
+                                    ? `🔗 房间：${activeRoomCode}（${formatLabel(format)}）· ${p2pStage === 'handshaking' ? '已连上对手，正在同步队伍…' : p2pStage === 'refreshing' ? '正在刷新信令…' : '正在寻找房主…'}`
+                                    : `🔗 Room: ${activeRoomCode} (${formatLabel(format)}) · ${p2pStage === 'handshaking' ? 'Syncing teams...' : p2pStage === 'refreshing' ? 'Refreshing...' : 'Connecting...'}`}
                         </span>
-                        <button
-                            onClick={() => navigator.clipboard.writeText(activeRoomCode)}
-                            className="text-xs bg-emerald-700 hover:bg-emerald-600 px-2.5 py-0.5 rounded text-white cursor-pointer"
-                        >
-                            {lang === 'zh' ? '复制房间码' : 'Copy Code'}
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                            <button
+                                onClick={() => p2pSessionRef.current?.reconnect()}
+                                className="text-xs bg-slate-800 hover:bg-slate-700 border border-emerald-600/60 px-2.5 py-0.5 rounded text-emerald-200 cursor-pointer"
+                            >
+                                🔄 {lang === 'zh' ? '刷新连接' : 'Retry'}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    void navigator.clipboard.writeText(activeRoomCode)
+                                    setCopiedCode(true)
+                                    setTimeout(() => setCopiedCode(false), 1800)
+                                }}
+                                className="text-xs bg-emerald-700 hover:bg-emerald-600 px-2.5 py-0.5 rounded text-white cursor-pointer"
+                            >
+                                {copiedCode ? (lang === 'zh' ? '✓ 已复制' : '✓ Copied') : lang === 'zh' ? '复制房间码' : 'Copy Code'}
+                            </button>
+                        </div>
                     </div>
                 )}
                 {mode === 'online' && onlineStatus === 'playing' && (

@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="https://play.pokemonshowdown.com/style/battle.css" />
+    <link rel="stylesheet" href="https://play.pokemonshowdown.com/style/utilichart.css" />
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #020617;
+        }
+
+        #stage-root {
+            position: absolute;
+            width: 640px;
+            height: 360px;
+            transform-origin: 0 0;
+        }
+
+        .battle {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 640px !important;
+            height: 360px !important;
+            border: 0 !important;
+        }
+
+        .battle-log,
+        .messagebar {
+            display: none !important;
+        }
+
+        .ps-type-pill {
+            display: inline-block;
+            padding: 1px 6px;
+            margin-right: 3px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1.3;
+            color: #fff;
+            vertical-align: middle;
+        }
+
+        #stage-err {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            color: #fda4af;
+            background: rgba(15, 23, 42, 0.92);
+            font: 13px/1.5 monospace;
+            white-space: pre-wrap;
+            z-index: 9999;
+        }
+    </style>
+    <script>
+        window.Config = {
+            routes: {
+                root: 'pokemonshowdown.com',
+                client: 'play.pokemonshowdown.com',
+                dex: 'dex.pokemonshowdown.com',
+                replays: 'replay.pokemonshowdown.com',
+                users: 'pokemonshowdown.com/users'
+            }
+        };
+    </script>
+    <script src="https://play.pokemonshowdown.com/js/lib/ps-polyfill.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/lib/jquery-1.11.0.min.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/lib/html-sanitizer-minified.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/battle-sound.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/battle-dex-data.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/battle-dex.js"></script>
+    <script src="https://play.pokemonshowdown.com/data/pokedex-mini.js"></script>
+    <script src="https://play.pokemonshowdown.com/data/pokedex-mini-bw.js"></script>
+    <script src="https://play.pokemonshowdown.com/data/graphics.js"></script>
+    <script src="https://play.pokemonshowdown.com/data/pokedex.js"></script>
+    <script src="https://play.pokemonshowdown.com/data/moves.js"></script>
+    <script src="https://play.pokemonshowdown.com/data/items.js"></script>
+    <script src="https://play.pokemonshowdown.com/data/abilities.js"></script>
+    <script src="https://play.pokemonshowdown.com/data/text.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/battle-text-parser.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/battle-log.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/battle-tooltips.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/battle-animations.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/battle-animations-moves.js"></script>
+    <script src="https://play.pokemonshowdown.com/js/battle.js"></script>
+</head>
+
+<body>
+    <div id="stage-root">
+        <div class="battle"></div>
+        <div class="battle-log"></div>
+    </div>
+    <div id="stage-err"></div>
+    <script>
+        (function () {
+            var root = document.getElementById('stage-root');
+            var errBox = document.getElementById('stage-err');
+            var battle = null;
+            var switched = false;
+            var currentLang = 'en';
+            var dict = { entities: {}, types: {} };
+            var translatingTip = false;
+            var tipObserver = null;
+            var activeSeq = 0;
+            var waitingUnlock = false;
+            var battleEnded = false;
+            var majorExpected = 0;
+            var majorPlayed = 0;
+            var lastVisualAt = 0;
+            var visualHoldUntil = 0;
+            var quietSince = 0;
+            var MAJOR_VISUAL = {
+                move: true,
+                switch: true,
+                drag: true,
+                replace: true,
+                faint: true,
+                swap: true,
+                cant: true
+            };
+            var MINOR_VISUAL = {
+                '-damage': true,
+                '-heal': true,
+                '-terastallize': true,
+                '-boost': true,
+                '-unboost': true
+            };
+            var POPUP_CMDS = {
+                '-ability': true,
+                '-activate': true,
+                '-item': true,
+                '-enditem': true,
+                '-start': true,
+                '-end': true,
+                '-status': true,
+                '-curestatus': true,
+                '-boost': true,
+                '-unboost': true,
+                '-supereffective': true,
+                '-resisted': true,
+                '-immune': true,
+                '-crit': true,
+                '-miss': true,
+                '-fail': true,
+                '-weather': true,
+                '-fieldstart': true,
+                '-fieldend': true,
+                '-sidestart': true,
+                '-sideend': true
+            };
+            var TYPE_BG = {
+                Normal: '#64748b', Fire: '#ea580c', Water: '#0284c7', Electric: '#ca8a04',
+                Grass: '#16a34a', Ice: '#0891b2', Fighting: '#b91c1c', Poison: '#9333ea',
+                Ground: '#b45309', Flying: '#4f46e5', Psychic: '#db2777', Bug: '#65a30d',
+                Rock: '#78716c', Ghost: '#6d28d9', Dragon: '#2563eb', Dark: '#334155',
+                Steel: '#475569', Fairy: '#ec4899', Stellar: '#06b6d4'
+            };
+            var PHRASES = {
+                zh: [
+                    ['(before external modifiers)', '（未计入道具/特性/场地修正）'],
+                    ['(after external modifiers)', '（已计入外部修正）'],
+                    ['Possible abilities:', '可能特性：'],
+                    ['Base ability:', '原特性：'],
+                    ['Ability:', '特性：'],
+                    ['Item:', '道具：'],
+                    ['Moves:', '招式：'],
+                    ['Tera Type:', '太晶属性：'],
+                    ['Terastallized', '已太晶化'],
+                    ['Base stats:', '种族值：'],
+                    ['Level ', '等级 '],
+                    ['(fainted)', '（濒死）'],
+                    ['Not revealed', '未公开'],
+                    ['(none)', '（无）'],
+                    ['HP:', 'HP：'],
+                    ['Super effective!', '效果绝佳！'],
+                    ['Super effective', '效果绝佳'],
+                    ['Not very effective', '效果不好'],
+                    ['Critical hit!', '击中要害！'],
+                    ['Critical!', '要害！'],
+                    ['Badly poisoned', '剧毒'],
+                    ['Restored HP', '回复体力'],
+                    ['Grassy Terrain', '青草场地'],
+                    ['Electric Terrain', '电气场地'],
+                    ['Psychic Terrain', '精神场地'],
+                    ['Misty Terrain', '薄雾场地'],
+                    ['Trick Room', '戏法空间'],
+                    ['Aurora Veil', '极光幕'],
+                    ['Light Screen', '光墙'],
+                    ['Stealth Rock', '隐形岩'],
+                    ['Toxic Spikes', '毒菱'],
+                    ['Sticky Web', '黏黏网']
+                ],
+                ja: [
+                    ['(before external modifiers)', '（特性・持ち物・場補正前）'],
+                    ['(after external modifiers)', '（外部補正込み）'],
+                    ['Possible abilities:', '特性候補：'],
+                    ['Base ability:', '元の特性：'],
+                    ['Ability:', '特性：'],
+                    ['Item:', '持ち物：'],
+                    ['Moves:', '技：'],
+                    ['Tera Type:', 'テラスタイプ：'],
+                    ['Terastallized', 'テラスタル中'],
+                    ['Base stats:', '種族値：'],
+                    ['Level ', 'Lv.'],
+                    ['(fainted)', '（ひんし）'],
+                    ['Not revealed', '未公開'],
+                    ['(none)', '（なし）'],
+                    ['HP:', 'HP：'],
+                    ['Super effective!', '効果バツグン！'],
+                    ['Super effective', '効果バツグン'],
+                    ['Not very effective', 'いまひとつ'],
+                    ['Critical hit!', '急所！'],
+                    ['Critical!', '急所！'],
+                    ['Badly poisoned', 'もうどく'],
+                    ['Restored HP', 'HP回復'],
+                    ['Grassy Terrain', 'グラスフィールド'],
+                    ['Electric Terrain', 'エレキフィールド'],
+                    ['Psychic Terrain', 'サイコフィールド'],
+                    ['Misty Terrain', 'ミストフィールド'],
+                    ['Trick Room', 'トリックルーム'],
+                    ['Aurora Veil', 'オーロラベール'],
+                    ['Light Screen', 'ひかりのかべ'],
+                    ['Stealth Rock', 'ステルスロック'],
+                    ['Toxic Spikes', 'どくびし'],
+                    ['Sticky Web', 'ねばねばネット']
+                ]
+            };
+            var SHORT_WORDS = {
+                zh: [
+                    [/\bFainted\b/g, '濒死'],
+                    [/\bNone\b/g, '无'],
+                    [/\bMissed\b/g, '未命中'],
+                    [/\bImmune\b/g, '无效'],
+                    [/\bResisted\b/g, '微弱'],
+                    [/\bProtected\b/g, '守住'],
+                    [/\bFailed\b/g, '失败'],
+                    [/\bBlocked\b/g, '被挡住'],
+                    [/\bFlinched\b/g, '畏缩'],
+                    [/\bBurned\b/g, '灼伤'],
+                    [/\bParalyzed\b/g, '麻痹'],
+                    [/\bPoisoned\b/g, '中毒'],
+                    [/\bAsleep\b/g, '睡眠'],
+                    [/\bFrozen\b/g, '冰冻'],
+                    [/\bConfused\b/g, '混乱'],
+                    [/\bSubstituted\b/g, '替身'],
+                    [/\bTaunted\b/g, '挑衅'],
+                    [/\bBRN\b/g, '灼伤'],
+                    [/\bPAR\b/g, '麻痹'],
+                    [/\bPSN\b/g, '中毒'],
+                    [/\bTOX\b/g, '剧毒'],
+                    [/\bSLP\b/g, '睡眠'],
+                    [/\bFRZ\b/g, '冰冻'],
+                    [/\bAtk\b/g, '攻击'],
+                    [/\bDef\b/g, '防御'],
+                    [/\bSpA\b/g, '特攻'],
+                    [/\bSpD\b/g, '特防'],
+                    [/\bSpe\b/g, '速度'],
+                    [/\bAcc\b/g, '命中'],
+                    [/\bEva\b/g, '闪避'],
+                    [/\bSandstorm\b/g, '沙暴'],
+                    [/\bRain\b/g, '下雨'],
+                    [/\bSun\b/g, '大晴天'],
+                    [/\bSnow\b/g, '下雪'],
+                    [/\bHail\b/g, '冰雹'],
+                    [/\bTailwind\b/g, '顺风'],
+                    [/\bReflect\b/g, '反射壁'],
+                    [/\bSpikes\b/g, '撒菱'],
+                    [/\bturns\b/g, '回合'],
+                    [/\bturn\b/g, '回合']
+                ],
+                ja: [
+                    [/\bFainted\b/g, 'ひんし'],
+                    [/\bNone\b/g, 'なし'],
+                    [/\bMissed\b/g, '外れた'],
+                    [/\bImmune\b/g, '無効'],
+                    [/\bResisted\b/g, 'いまひとつ'],
+                    [/\bProtected\b/g, 'まもった'],
+                    [/\bFailed\b/g, '失敗'],
+                    [/\bBlocked\b/g, '防いだ'],
+                    [/\bFlinched\b/g, 'ひるみ'],
+                    [/\bBurned\b/g, 'やけど'],
+                    [/\bParalyzed\b/g, 'まひ'],
+                    [/\bPoisoned\b/g, 'どく'],
+                    [/\bAsleep\b/g, 'ねむり'],
+                    [/\bFrozen\b/g, 'こおり'],
+                    [/\bConfused\b/g, 'こんらん'],
+                    [/\bSubstituted\b/g, 'みがわり'],
+                    [/\bTaunted\b/g, 'ちょうはつ'],
+                    [/\bBRN\b/g, '火傷'],
+                    [/\bPAR\b/g, '麻痺'],
+                    [/\bPSN\b/g, '毒'],
+                    [/\bTOX\b/g, '猛毒'],
+                    [/\bSLP\b/g, '眠り'],
+                    [/\bFRZ\b/g, '氷'],
+                    [/\bAtk\b/g, '攻撃'],
+                    [/\bDef\b/g, '防御'],
+                    [/\bSpA\b/g, '特攻'],
+                    [/\bSpD\b/g, '特防'],
+                    [/\bSpe\b/g, '素早'],
+                    [/\bAcc\b/g, '命中'],
+                    [/\bEva\b/g, '回避'],
+                    [/\bSandstorm\b/g, 'すなあらし'],
+                    [/\bRain\b/g, 'あめ'],
+                    [/\bSun\b/g, 'はれ'],
+                    [/\bSnow\b/g, 'ゆき'],
+                    [/\bHail\b/g, 'あられ'],
+                    [/\bTailwind\b/g, 'おいかぜ'],
+                    [/\bReflect\b/g, 'リフレクター'],
+                    [/\bSpikes\b/g, 'まきびし'],
+                    [/\bturns\b/g, 'ターン'],
+                    [/\bturn\b/g, 'ターン']
+                ]
+            };
+            function showError(msg) {
+                errBox.style.display = 'flex';
+                errBox.textContent = msg;
+            }
+            function fitScale() {
+                var vw = window.innerWidth;
+                var vh = window.innerHeight;
+                if (vw <= 0 || vh <= 0) return;
+                var s = Math.min(vw / 640, vh / 360);
+                root.style.transform = 'scale(' + s + ')';
+                root.style.left = Math.max(0, (vw - 640 * s) / 2) + 'px';
+                root.style.top = Math.max(0, (vh - 360 * s) / 2) + 'px';
+            }
+            window.addEventListener('resize', fitScale);
+            if (typeof ResizeObserver === 'function') {
+                new ResizeObserver(fitScale).observe(document.body);
+            }
+            fitScale();
+            function holdVisual(ms) {
+                var until = Date.now() + ms;
+                if (until > visualHoldUntil) visualHoldUntil = until;
+                quietSince = 0;
+            }
+            function translateText(text) {
+                if (!text || currentLang === 'en') return text;
+                var trimmed = text.trim();
+                if (!trimmed) return text;
+                var exact = dict.entities[trimmed.toLowerCase()];
+                if (exact) return text.replace(trimmed, exact);
+                var out = text;
+                var list = PHRASES[currentLang] || [];
+                for (var i = 0; i < list.length; i++) {
+                    if (out.indexOf(list[i][0]) !== -1) {
+                        out = out.split(list[i][0]).join(list[i][1]);
+                    }
+                }
+                out = out.replace(/Turn (\d+)/g, function (_, n) {
+                    return currentLang === 'zh' ? '第 ' + n + ' 回合' : n + ' ターン目';
+                });
+                out = out.replace(/[A-Za-z][A-Za-z0-9'’-]*(?:\s+[A-Za-z0-9'’-]+)*/g, function (match) {
+                    var direct = dict.entities[match.toLowerCase()];
+                    if (direct) return direct;
+                    var t = match.trim().toLowerCase();
+                    if (dict.entities[t]) return dict.entities[t];
+                    return match;
+                });
+                var shorts = SHORT_WORDS[currentLang] || [];
+                for (var j = 0; j < shorts.length; j++) {
+                    out = out.replace(shorts[j][0], shorts[j][1]);
+                }
+                return out;
+            }
+            function translateHtmlSafe(str) {
+                if (!str || currentLang === 'en') return str;
+                if (str.indexOf('<') === -1) return translateText(str);
+                return str.split(/(<[^>]+>)/g).map(function (seg) {
+                    if (!seg || seg.charAt(0) === '<') return seg;
+                    return translateText(seg);
+                }).join('');
+            }
+            function translateSubtree(container) {
+                if (!container || currentLang === 'en') return;
+                var imgs = container.querySelectorAll('img[alt]');
+                for (var i = 0; i < imgs.length; i++) {
+                    var img = imgs[i];
+                    var src = img.getAttribute('src') || '';
+                    var alt = img.getAttribute('alt') || '';
+                    if (src.indexOf('/types/') !== -1 && dict.types[alt]) {
+                        var span = document.createElement('span');
+                        span.className = 'ps-type-pill';
+                        span.style.background = TYPE_BG[alt] || '#475569';
+                        span.textContent = dict.types[alt];
+                        if (img.parentNode) img.parentNode.replaceChild(span, img);
+                    }
+                }
+                var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+                var node;
+                while ((node = walker.nextNode())) {
+                    if (!node.nodeValue || !node.nodeValue.trim()) continue;
+                    var nextVal = translateText(node.nodeValue);
+                    if (nextVal !== node.nodeValue) node.nodeValue = nextVal;
+                }
+            }
+            function translateHudLabels() {
+                var statNames = document.querySelectorAll('.statbar strong');
+                for (var i = 0; i < statNames.length; i++) {
+                    var el = statNames[i];
+                    var first = el.firstChild;
+                    if (first && first.nodeType === 3) {
+                        var rawText = el.dataset.origName || first.nodeValue || '';
+                        if (!el.dataset.origName && rawText.trim()) el.dataset.origName = rawText;
+                        if (el.dataset.tLang === currentLang) continue;
+                        if (currentLang === 'en') {
+                            if (first.nodeValue !== rawText) first.nodeValue = rawText;
+                        } else {
+                            var base = rawText.trim().toLowerCase();
+                            var localized = dict.entities[base];
+                            if (localized) {
+                                var trailing = /\s+$/.test(rawText) ? ' ' : '';
+                                if (first.nodeValue !== localized + trailing) first.nodeValue = localized + trailing;
+                            }
+                        }
+                        el.dataset.tLang = currentLang;
+                    }
+                }
+                if (currentLang !== 'en') {
+                    var extras = document.querySelectorAll('.weather, .turn, .battle .result, .battle .ability, .battle .abilitybar, .battle .statbar .status');
+                    for (var j = 0; j < extras.length; j++) {
+                        translateSubtree(extras[j]);
+                    }
+                }
+            }
+            function attachTooltipObserver() {
+                if (tipObserver) return;
+                var tip = document.getElementById('tooltipwrapper');
+                if (!tip) return;
+                tipObserver = new MutationObserver(function () {
+                    if (translatingTip || currentLang === 'en') return;
+                    translatingTip = true;
+                    try {
+                        translateSubtree(tip);
+                    } finally {
+                        translatingTip = false;
+                    }
+                });
+                tipObserver.observe(tip, { childList: true, subtree: true });
+            }
+            document.addEventListener('mouseover', function () {
+                attachTooltipObserver();
+                if (currentLang === 'en') return;
+                var tip = document.getElementById('tooltipwrapper');
+                if (tip && tip.childNodes.length > 0 && !translatingTip) {
+                    translatingTip = true;
+                    try {
+                        translateSubtree(tip);
+                    } finally {
+                        translatingTip = false;
+                    }
+                }
+            }, true);
+            function hasRealSpriteAnim() {
+                if (!window.$) return false;
+                return window.$('.battle :animated').not('.weather, .weather *, .messagebar, .messagebar *').length > 0;
+            }
+            function tickUnlock() {
+                if (!battle || !waitingUnlock) return;
+                var now = Date.now();
+                if (now < visualHoldUntil) {
+                    quietSince = 0;
+                    return;
+                }
+                var allMajorsDone = majorPlayed >= majorExpected || (now - lastVisualAt >= 1800);
+                if (!allMajorsDone) {
+                    quietSince = 0;
+                    return;
+                }
+                if (hasRealSpriteAnim()) {
+                    quietSince = 0;
+                    return;
+                }
+                if (quietSince === 0) {
+                    quietSince = now;
+                    return;
+                }
+                var needQuiet = battleEnded ? 260 : 85;
+                if (now - quietSince >= needQuiet) {
+                    waitingUnlock = false;
+                    quietSince = 0;
+                    translateHudLabels();
+                    window.parent.postMessage({ type: 'PLAYBACK', playing: false, seq: activeSeq }, '*');
+                }
+            }
+            setInterval(tickUnlock, 30);
+            function hookBattle(b) {
+                if (b.scene && typeof b.scene.resultAnim === 'function') {
+                    var origResultAnim = b.scene.resultAnim.bind(b.scene);
+                    b.scene.resultAnim = function () {
+                        var args = Array.prototype.slice.call(arguments);
+                        if (typeof args[1] === 'string' && currentLang !== 'en') {
+                            args[1] = translateHtmlSafe(args[1]);
+                        }
+                        return origResultAnim.apply(b.scene, args);
+                    };
+                }
+                if (b.scene && typeof b.scene.abilityAnim === 'function') {
+                    var origAbilityAnim = b.scene.abilityAnim.bind(b.scene);
+                    b.scene.abilityAnim = function () {
+                        var args = Array.prototype.slice.call(arguments);
+                        if (typeof args[1] === 'string' && currentLang !== 'en') {
+                            args[1] = translateHtmlSafe(args[1]);
+                        }
+                        return origAbilityAnim.apply(b.scene, args);
+                    };
+                }
+                if (typeof b.runMajor === 'function') {
+                    var origMajor = b.runMajor.bind(b);
+                    b.runMajor = function (args, kwArgs, preempt) {
+                        var res = origMajor(args, kwArgs, preempt);
+                        if (!preempt && !b.fastForward && Array.isArray(args) && args.length > 0) {
+                            var cmd = args[0];
+                            if (MAJOR_VISUAL[cmd]) {
+                                majorPlayed += 1;
+                                lastVisualAt = Date.now();
+                                if (cmd === 'move' && !(kwArgs && kwArgs.still)) holdVisual(340);
+                                else if (cmd === 'faint') holdVisual(380);
+                                else if (cmd === 'switch' || cmd === 'drag' || cmd === 'replace') holdVisual(280);
+                                else holdVisual(180);
+                            }
+                            if (cmd === 'win' || cmd === 'tie') {
+                                battleEnded = true;
+                                majorPlayed = majorExpected;
+                                lastVisualAt = Date.now();
+                                holdVisual(240);
+                            }
+                            if (cmd === 'switch' || cmd === 'drag' || cmd === 'replace' || cmd === 'turn' || cmd === 'cant') {
+                                setTimeout(translateHudLabels, 40);
+                            }
+                            window.parent.postMessage({
+                                type: 'STAGE_EVENT',
+                                cmd: cmd,
+                                args: args.slice(0, 5),
+                                still: Boolean(kwArgs && kwArgs.still)
+                            }, '*');
+                        }
+                        return res;
+                    };
+                }
+                if (typeof b.runMinor === 'function') {
+                    var origMinor = b.runMinor.bind(b);
+                    b.runMinor = function (args, kwArgs, nextArgs, nextKwArgs) {
+                        var res = origMinor(args, kwArgs, nextArgs, nextKwArgs);
+                        if (!b.fastForward && Array.isArray(args) && args.length > 0) {
+                            var cmd = args[0];
+                            if (MINOR_VISUAL[cmd]) {
+                                lastVisualAt = Date.now();
+                                if (cmd === '-terastallize') holdVisual(480);
+                                else if (cmd === '-damage' || cmd === '-heal') holdVisual(220);
+                                else holdVisual(160);
+                            }
+                            if (POPUP_CMDS[cmd] || (kwArgs && kwArgs.from)) {
+                                setTimeout(translateHudLabels, 30);
+                            }
+                            window.parent.postMessage({
+                                type: 'STAGE_EVENT',
+                                cmd: cmd,
+                                args: args.slice(0, 5),
+                                still: false
+                            }, '*');
+                        }
+                        return res;
+                    };
+                }
+            }
+            function createBattle(notifyReady) {
+                try {
+                    if (battle && typeof battle.destroy === 'function') {
+                        try {
+                            battle.destroy();
+                        } catch (e) { }
+                    }
+                    var battleEl = document.querySelector('.battle');
+                    var logEl = document.querySelector('.battle-log');
+                    if (battleEl) battleEl.innerHTML = '';
+                    if (logEl) logEl.innerHTML = '';
+                    switched = false;
+                    activeSeq = 0;
+                    waitingUnlock = false;
+                    battleEnded = false;
+                    majorExpected = 0;
+                    majorPlayed = 0;
+                    lastVisualAt = Date.now();
+                    visualHoldUntil = 0;
+                    quietSince = 0;
+                    if (window.Dex) {
+                        window.Dex.resourcePrefix = 'https://play.pokemonshowdown.com/';
+                    }
+                    if (window.BattleSound) {
+                        window.BattleSound.setEffectVolume(0);
+                        window.BattleSound.setBgmVolume(0);
+                        window.BattleSound.setMute(true);
+                    }
+                    battle = new window.Battle({
+                        id: 'battle-stage',
+                        $frame: window.$('.battle'),
+                        $logFrame: window.$('.battle-log')
+                    });
+                    hookBattle(battle);
+                    attachTooltipObserver();
+                    if (battle.paused && typeof battle.play === 'function') {
+                        battle.play();
+                    }
+                    fitScale();
+                    if (notifyReady) {
+                        window.parent.postMessage({ type: 'STAGE_READY' }, '*');
+                    }
+                } catch (err) {
+                    showError('Showdown Stage Init Error:\n' + (err && err.stack ? err.stack : String(err)));
+                }
+            }
+            window.addEventListener('message', function (ev) {
+                var data = ev.data;
+                if (!data) return;
+                if (data.type === 'I18N') {
+                    currentLang = data.lang || 'en';
+                    dict = data.dict || { entities: {}, types: {} };
+                    var statNames = document.querySelectorAll('.statbar strong');
+                    for (var k = 0; k < statNames.length; k++) {
+                        delete statNames[k].dataset.tLang;
+                    }
+                    translateHudLabels();
+                    return;
+                }
+                if (data.type === 'RESET') {
+                    createBattle(false);
+                    if (data.role === 'p2' && battle && typeof battle.switchViewpoint === 'function') {
+                        switched = true;
+                        battle.switchViewpoint();
+                    }
+                    return;
+                }
+                if (!battle) return;
+                if (data.type === 'VIEWPOINT') {
+                    var wantSwitch = data.role === 'p2';
+                    if (wantSwitch !== switched && typeof battle.switchViewpoint === 'function') {
+                        switched = wantSwitch;
+                        battle.switchViewpoint();
+                    }
+                } else if (data.type === 'SKIP') {
+                    try {
+                        if (typeof battle.seekTurn === 'function') {
+                            battle.seekTurn(Infinity);
+                        }
+                        if (battle.paused && !battle.ended && typeof battle.play === 'function') {
+                            battle.play();
+                        }
+                    } catch (e) { }
+                    majorPlayed = majorExpected;
+                    waitingUnlock = false;
+                    quietSince = 0;
+                    translateHudLabels();
+                    window.parent.postMessage({ type: 'PLAYBACK', playing: false, seq: activeSeq }, '*');
+                } else if (data.type === 'LINES' && Array.isArray(data.lines)) {
+                    fitScale();
+                    var clean = [];
+                    var batchMajors = 0;
+                    var hasMinorVisual = false;
+                    for (var i = 0; i < data.lines.length; i++) {
+                        var line = data.lines[i];
+                        if (!line || line.indexOf('|request|') === 0 || line.indexOf('|error|') === 0) continue;
+                        clean.push(line);
+                        if (line.charAt(0) === '|') {
+                            var bar = line.indexOf('|', 1);
+                            var cmd = bar > 1 ? line.slice(1, bar) : line.slice(1);
+                            if (MAJOR_VISUAL[cmd]) batchMajors += 1;
+                            else if (MINOR_VISUAL[cmd]) hasMinorVisual = true;
+                        }
+                    }
+                    if (typeof data.seq === 'number' && data.seq > 0) {
+                        activeSeq = data.seq;
+                        majorExpected += batchMajors;
+                        waitingUnlock = true;
+                        lastVisualAt = Date.now();
+                        holdVisual(batchMajors > 0 ? 180 : hasMinorVisual ? 220 : 80);
+                    }
+                    if (clean.length > 0) {
+                        for (var j = 0; j < clean.length; j++) {
+                            try {
+                                battle.add(clean[j]);
+                            } catch (err) {
+                                console.error(err);
+                            }
+                        }
+                        if (battle.paused && !battle.ended && typeof battle.play === 'function') {
+                            battle.play();
+                        }
+                        setTimeout(fitScale, 50);
+                    }
+                }
+            });
+            window.addEventListener('load', function () {
+                createBattle(true);
+            });
+        })();
+    </script>
+</body>
+
+</html>

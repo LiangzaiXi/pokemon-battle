@@ -377,9 +377,11 @@
             }
             function translateHtmlSafe(str) {
                 if (!str || currentLang === 'en') return str;
-                if (str.indexOf('<') === -1) return translateText(str);
-                return str.split(/(<[^>]+>)/g).map(function (seg) {
-                    if (!seg || seg.charAt(0) === '<') return seg;
+                if (str.indexOf('<') === -1 && str.indexOf('&') === -1) return translateText(str);
+                return str.split(/(<[^>]+>|&[a-zA-Z0-9#]+;)/g).map(function (seg) {
+                    if (!seg || seg.charAt(0) === '<' || (seg.charAt(0) === '&' && seg.charAt(seg.length - 1) === ';')) {
+                        return seg;
+                    }
                     return translateText(seg);
                 }).join('');
             }

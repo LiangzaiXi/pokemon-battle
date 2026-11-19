@@ -217,6 +217,8 @@ export default function BattleArena({
     const [onlineStatus, setOnlineStatus] = useState<OnlineStatus>('idle')
     const [roomCodeInput, setRoomCodeInput] = useState('')
     const [activeRoomCode, setActiveRoomCode] = useState('')
+    const [roomMode, setRoomMode] = useState<'create' | 'join'>('create')
+    const [onlineError, setOnlineError] = useState('')
     const [myRole, setMyRole] = useState<'p1' | 'p2'>('p1')
     const [pickedLimit, setPickedLimit] = useState<number>(isDoubles ? 4 : 3)
     const [stagePlaying, setStagePlaying] = useState<boolean>(false)
@@ -611,13 +613,19 @@ export default function BattleArena({
         }
         worker.postMessage({ type: 'START_OFFLINE', formatId: format, p1Paste: myPaste, p2Paste: pickedCpu.paste })
     }
-    const joinOnlineRoom = (code: string) => {
-        const cleanCode = code.trim()
+    const formatLabel = (fmt: string) =>
+        fmt.includes('doubles')
+            ? langRef.current === 'zh' ? '64 双打' : langRef.current === 'ja' ? '64 ダブル' : '64 Doubles'
+            : langRef.current === 'zh' ? '63 单打' : langRef.current === 'ja' ? '63 シングル' : '63 Singles'
+    const joinOnlineRoom = (code: string, joinType: 'create' | 'join' = 'join') => {
+        const cleanCode = code.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
         if (!cleanCode) return
         const myPaste = getValidatedMyPaste()
         if (!myPaste) return
         cleanupAll()
         setStarted(false)
+        setOnlineError('')
+        setRoomMode(joinType)
         setActiveRoomCode(cleanCode)
         setOnlineStatus('waiting')
         const session = connectP2PRoom(cleanCode, format, myPaste, {
@@ -645,6 +653,17 @@ export default function BattleArena({
             onProtocol(chunk) {
                 handleProtocolChunk(chunk)
             },
+            onFormatMismatch(peerFormat) {
+                cleanupAll()
+                setStarted(false)
+                setActiveRoomCode('')
+                setOnlineStatus('idle')
+                setOnlineError(
+                    langRef.current === 'zh'
+                        ? `⚠️ 双方赛制不一致：你当前是【${formatLabel(format)}】，对方是【${formatLabel(peerFormat)}】，请切换到同一赛制后再加入。`
+                        : `⚠️ Format mismatch: you are in ${formatLabel(format)}, opponent is in ${formatLabel(peerFormat)}.`
+                )
+            },
             onOpponentLeft() {
                 setOnlineStatus('disconnected')
                 stopBattleBgm()
@@ -658,22 +677,28 @@ export default function BattleArena({
         if (!myPaste) return
         cleanupAll()
         setStarted(false)
+        setOnlineError('')
         setActiveRoomCode('')
         setOnlineStatus('matching')
         const handle = startRandomMatchmaking(format, (matchedRoomId) => {
             matchCancelRef.current = null
-            joinOnlineRoom(matchedRoomId)
+            joinOnlineRoom(matchedRoomId, 'join')
         })
         matchCancelRef.current = handle.cancel
     }
     const handleCreatePrivateRoom = () => {
-        const code = Math.random().toString(36).slice(2, 8).toUpperCase()
+        const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+        let code = ''
+        for (let i = 0; i < 6; i++) {
+            code += chars[Math.floor(Math.random() * chars.length)]
+        }
         setRoomCodeInput(code)
-        joinOnlineRoom(code)
+        joinOnlineRoom(code, 'create')
     }
     const handleLeaveOnline = () => {
         cleanupAll()
         setStarted(false)
+        setOnlineError('')
         setActiveRoomCode('')
         setOnlineStatus('idle')
     }
@@ -937,12 +962,15 @@ export default function BattleArena({
                             <input
                                 value={roomCodeInput}
                                 onChange={(e) => setRoomCodeInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') joinOnlineRoom(roomCodeInput, 'join')
+                                }}
                                 placeholder={lang === 'zh' ? '输入房间码...' : 'Room code...'}
                                 className="bg-slate-950 border border-slate-600 rounded-lg px-2.5 py-1 text-xs w-32 uppercase text-white"
                             />
                             <button
                                 data-sfx="confirm"
-                                onClick={() => joinOnlineRoom(roomCodeInput)}
+                                onClick={() => joinOnlineRoom(roomCodeInput, 'join')}
                                 className="bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer"
                             >
                                 {lang === 'zh' ? '加入' : lang === 'ja' ? '参加' : 'Join'}
@@ -957,12 +985,21 @@ export default function BattleArena({
                             : `⏳ Searching for an opponent in P2P ${isDoubles ? '64 Doubles' : '63 Singles'} lobby...`}
                     </div>
                 )}
+                {mode === 'online' && onlineError && (
+                    <div className="text-xs text-rose-300 bg-rose-950/60 border border-rose-600/70 rounded-lg px-3 py-1.5 font-semibold">
+                        {onlineError}
+                    </div>
+                )}
                 {mode === 'online' && onlineStatus === 'waiting' && (
                     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-300 bg-emerald-950/50 border border-emerald-700/60 rounded-lg px-3 py-1.5">
                         <span>
-                            {lang === 'zh'
-                                ? `🏠 房间码：${activeRoomCode}，等待对手加入（双方赛制需一致）…`
-                                : `🏠 Room Code: ${activeRoomCode} — Waiting for opponent...`}
+                            {roomMode === 'create'
+                                ? lang === 'zh'
+                                    ? `🏠 房间码：${activeRoomCode}，等待对手加入（当前赛制：${formatLabel(format)}）…`
+                                    : `🏠 Room Code: ${activeRoomCode} — Waiting for opponent (${formatLabel(format)})...`
+                                : lang === 'zh'
+                                    ? `🔗 正在连接房间：${activeRoomCode}（当前赛制：${formatLabel(format)}）…`
+                                    : `🔗 Connecting to Room: ${activeRoomCode} (${formatLabel(format)})...`}
                         </span>
                         <button
                             onClick={() => navigator.clipboard.writeText(activeRoomCode)}
@@ -1150,8 +1187,8 @@ export default function BattleArena({
                                                             key={i}
                                                             onClick={() => togglePreviewIndex(i + 1)}
                                                             className={`relative p-1 rounded-lg border text-center cursor-pointer transition ${orderPos >= 0
-                                                                    ? 'bg-red-500/45 border-amber-400 shadow-[0_0_10px_rgba(250,204,21,0.35)]'
-                                                                    : 'bg-slate-900/55 border-white/15 hover:border-white/45'
+                                                                ? 'bg-red-500/45 border-amber-400 shadow-[0_0_10px_rgba(250,204,21,0.35)]'
+                                                                : 'bg-slate-900/55 border-white/15 hover:border-white/45'
                                                                 }`}
                                                         >
                                                             {orderPos >= 0 && (
@@ -1242,8 +1279,8 @@ export default function BattleArena({
                                                     data-sfx="tera"
                                                     onClick={() => setWantTera((v) => !v)}
                                                     className={`text-[11px] px-2.5 py-0.5 rounded-full border font-bold cursor-pointer transition ${wantTera
-                                                            ? 'bg-cyan-400/90 text-slate-950 border-white shadow-[0_0_14px_rgba(34,211,238,0.8)]'
-                                                            : 'bg-slate-900/60 text-cyan-200 border-cyan-400/70 hover:bg-cyan-950/70'
+                                                        ? 'bg-cyan-400/90 text-slate-950 border-white shadow-[0_0_14px_rgba(34,211,238,0.8)]'
+                                                        : 'bg-slate-900/60 text-cyan-200 border-cyan-400/70 hover:bg-cyan-950/70'
                                                         }`}
                                                 >
                                                     💎 {lang === 'zh' ? '太晶' : lang === 'ja' ? 'テラス' : 'Tera'} ({getTypeEntry(currentActiveReq.canTerastallize)[lang]})

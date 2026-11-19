@@ -7,6 +7,7 @@ import SearchableSelect, { type SearchOption } from '../../components/Searchable
 import { ItemIcon, PokemonMiniIcon } from '../../components/DexIcons'
 import TownBgmBar from './TownBgmBar'
 import { playPokemonCry } from '../battle/showdownAssets'
+import { resolveMoveType } from '../../utils/moveType'
 import {
     buildSearchText,
     getAbilityEntry,
@@ -223,7 +224,14 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
         return learnableMoveNames.map((moveName) => {
             const entry = getMoveEntry(moveName)
             const m = gen.moves.get(moveName)
-            const typeEntry = m ? getTypeEntry(m.type) : { en: '', zh: '', ja: '' }
+            const effType = m
+                ? resolveMoveType(m.name, {
+                    species: currentSpecies.name,
+                    item: currentMember.item,
+                    ability: currentMember.ability,
+                })
+                : 'Normal'
+            const typeEntry = m ? getTypeEntry(effType) : { en: '', zh: '', ja: '' }
             const cat = m ? getCategoryLabel(m.category, lang) : ''
             const bp = m && m.basePower > 0 ? ` ${m.basePower}` : ''
             return {
@@ -232,14 +240,14 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
                 subLabel: m ? `${cat}${bp}` : undefined,
                 searchText: buildSearchText(entry, `${typeEntry.zh} ${typeEntry.ja} ${typeEntry.en} ${cat}`),
                 icon: m ? (
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${TYPE_BADGE_CLS[m.type] || 'bg-slate-600 text-white'}`}>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${TYPE_BADGE_CLS[effType] || 'bg-slate-600 text-white'}`}>
                         {typeEntry[lang]}
                     </span>
                 ) : undefined,
                 detailKind: 'move',
             }
         })
-    }, [learnableMoveNames, lang])
+    }, [learnableMoveNames, lang, currentSpecies.name, currentMember.item, currentMember.ability])
     const updateMember = (patch: Partial<PokemonMember>) => {
         setEditingTeam((prev) => ({
             ...prev,
@@ -254,13 +262,38 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
             return
         }
         const firstAbility = (Object.values(sp.abilities).filter(Boolean)[0] as string) || ''
-        updateMember({
+        const patch: Partial<PokemonMember> = {
             species: sp.name,
             ability: firstAbility,
             teraType: sp.types[0] || 'Normal',
             moves: ['', '', '', ''],
-        })
+        }
+        if (sp.requiredItem) {
+            patch.item = sp.requiredItem
+        }
+        updateMember(patch)
         playPokemonCry(sp.name)
+    }
+    const handleSelectItem = (itemName: string) => {
+        const patch: Partial<PokemonMember> = { item: itemName }
+        const itemObj = itemName ? gen.items.get(itemName) : undefined
+        const forcedName = itemObj?.forcedForme
+        if (forcedName) {
+            const forcedSp = gen.species.get(forcedName)
+            if (forcedSp && !forcedSp.battleOnly && forcedSp.baseSpecies === currentSpecies.baseSpecies) {
+                patch.species = forcedSp.name
+                const firstAb = (Object.values(forcedSp.abilities).filter(Boolean)[0] as string) || ''
+                if (firstAb) patch.ability = firstAb
+            }
+        } else if (currentSpecies.requiredItem && currentSpecies.requiredItem !== itemName) {
+            const baseSp = gen.species.get(currentSpecies.baseSpecies)
+            if (baseSp) {
+                patch.species = baseSp.name
+                const firstAb = (Object.values(baseSp.abilities).filter(Boolean)[0] as string) || ''
+                if (firstAb) patch.ability = firstAb
+            }
+        }
+        updateMember(patch)
     }
     const handleEvChange = (stat: StatKey, rawValue: number) => {
         const val = Math.max(0, Math.min(252, Number.isNaN(rawValue) ? 0 : rawValue))
@@ -517,7 +550,7 @@ export default function TeamBuilder({ format }: { format: BattleFormat }) {
                                     <SearchableSelect
                                         options={itemOptions}
                                         value={currentMember.item}
-                                        onChange={(val) => updateMember({ item: val })}
+                                        onChange={handleSelectItem}
                                         placeholder={t('searchItem')}
                                         allowEmpty
                                         emptyLabel={t('noItem')}

@@ -4,6 +4,7 @@ import { Dex } from '@pkmn/dex'
 import { Sprites } from '@pkmn/img'
 import ShowdownStage, { type ShowdownStageHandle } from './ShowdownStage'
 import { CPU_TEAM_PRESETS, pickCpuTeamPaste } from './cpuTeams'
+import { resolveMoveType } from '../../utils/moveType'
 import {
     BATTLE_BGM_TRACKS,
     setBattleBgmMuted,
@@ -1344,8 +1345,18 @@ export default function BattleArena({
                                                                 </div>
                                                             )
                                                         }
+                                                        const effMoveType = targetMoveData?.exists && currentSideMon
+                                                            ? resolveMoveType(targetMoveData.id || targetMoveData.name, {
+                                                                species: parseDetails(currentSideMon.details).species,
+                                                                item: currentSideMon.item,
+                                                                ability: currentSideMon.ability,
+                                                                teraType:
+                                                                    myActive[activeSlotCursor]?.teraType ||
+                                                                    (choosingTargetFor.tera ? currentActiveReq?.canTerastallize : ''),
+                                                            })
+                                                            : targetMoveData?.type || 'Normal'
                                                         const eff = targetMoveData?.exists
-                                                            ? calcEffectiveness(targetMoveData.type, targetMoveData.category, mon)
+                                                            ? calcEffectiveness(effMoveType, targetMoveData.category, mon)
                                                             : null
                                                         const tag = formatEffTag(eff, lang)
                                                         return (
@@ -1407,10 +1418,20 @@ export default function BattleArena({
                                             <div className="grid grid-cols-2 gap-1.5">
                                                 {currentActiveReq.moves.map((mv, idx) => {
                                                     const md = Dex.moves.get(mv.id || mv.move)
-                                                    const typeName = md.exists ? getTypeEntry(md.type)[lang] : ''
+                                                    const effMoveType = md.exists
+                                                        ? resolveMoveType(md.id || md.name, {
+                                                            species: parseDetails(currentSideMon.details).species,
+                                                            item: currentSideMon.item,
+                                                            ability: currentSideMon.ability,
+                                                            teraType:
+                                                                myActive[activeSlotCursor]?.teraType ||
+                                                                (wantTera ? currentActiveReq.canTerastallize : ''),
+                                                        })
+                                                        : 'Normal'
+                                                    const typeName = md.exists ? getTypeEntry(effMoveType)[lang] : ''
                                                     const catLabel = md.exists ? getCategoryLabel(md.category, lang) : ''
-                                                    const btnCls = TYPE_BTN_STYLES[md.type] || TYPE_BTN_STYLES.Normal
-                                                    const eff = !isDoubles && md.exists ? calcEffectiveness(md.type, md.category, foeActive[0]) : null
+                                                    const btnCls = TYPE_BTN_STYLES[effMoveType] || TYPE_BTN_STYLES.Normal
+                                                    const eff = !isDoubles && md.exists ? calcEffectiveness(effMoveType, md.category, foeActive[0]) : null
                                                     const effTag = formatEffTag(eff, lang)
                                                     return (
                                                         <button

@@ -401,6 +401,7 @@
                     }
                 }
                 var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+
                 var node;
                 while ((node = walker.nextNode())) {
                     if (!node.nodeValue || !node.nodeValue.trim()) continue;
